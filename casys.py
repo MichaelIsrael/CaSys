@@ -85,7 +85,7 @@ It parses the arguments and initialized the logger.
 	#Setting timer:
 	#TODO: Goto beginning of the hour first?
 	GLib.timeout_add_seconds(5, cleaner, casys)
-	GLib.timeout_add_seconds(FRAGMENT_TIME, deleteOld, casys)
+	#GLib.timeout_add_seconds(FRAGMENT_TIME, deleteOld, casys)
 	GLib.timeout_add_seconds(FRAGMENT_TIME, casys.fragment)
 
 	#Main loop:
