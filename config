@@ -1,0 +1,3 @@
+-l=info
+--logformat={asctime}: {levelname:7s}: {name}: {message}
+--logfile=log.log

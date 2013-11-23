@@ -1,0 +1,25 @@
+Version 1.0:
+------------
++ Delete old video files automatically.
+
+
+Version 0.3:
+------------
++ Copyright disclaimer added.
++ Video chunks named based on time.
++ Detect all available Cameras and use them.
++ A basic Object for video cameras is created.
++ Creating a pipeline for each Camera detected.
+
+
+Version 0.2:
+------------
++ CHANGELOG file (this file) is created.
++ GLib MainLoop is added.
++ Basic pipeline from default Camera to a file (POC).
++ Chunking output video files every 10 seconds (POC).
+
+Version 0.1:
+------------
++ Initializing logger.
++ Parsing main arguments.

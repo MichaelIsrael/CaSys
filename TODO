@@ -1,0 +1,54 @@
+BUGS:
+=====
+  X  Video files for old devices are never removed.
+  X  Time used is one hour old (Maybe because of DST) [Using localtime() instead of gmtime()]
+  X  Forever growing log file.
+
+General:
+--------
+  X  Write copyright disssclaimer.
+  X  Parse arguments.
+  D  Delete old video files automatically (Based on name).
+  X  Delete old video files automatically (Based on file creation time) Concerning Bug1.
+  B  GLib-loop.
+  _  catching all interrupts.
+  _  Installation script.
+
+Logging and reporting:
+----------------------
+  X  Init logger.
+  _  Use RotatingFileHandler.
+  _  Email on Fatals. (SMTPHandler)
+  _  Use a QueueHandler and a QueueListener for emails.
+  _  Gstreamer bus for logging.
+
+Video capturing:
+----------------
+  X  Automatic video devices detect. /dev/video$Name
+  X  Creating a different pipeline for each detected device.
+  B  Build video objects with iterators.
+  B  Gstreamer pipelines to files.
+  B  Timer and chunking files.
+
+Streaming:
+----------
+  _  RTSP Streaming. 
+  _  RTSP with authentication.
+  _  Hot-pluging streaming bin.
+
+System:
+-------
+  _  udev rule for known cameras.
+  _  startx/xinit script.
+  _  create user with relavent permissions.
+
+Interface:
+----------
+  _  Basic interface to view cameras on a display.
+  _  Divided display for four cameras.
+  _  Display generic number of cameras.
+
+Control:
+--------
+  _  Control server.
+  _  Control client.
