@@ -26,12 +26,12 @@ import time
 from casyscontrol import CasysControl
 from casys_const import *
 from glob import iglob
-from os import path
+from queue import Queue
 import os
 import sys
 import argparse
 import logging
-from logging.handlers import RotatingFileHandler, SMTPHandler
+from logging.handlers import RotatingFileHandler, SMTPHandler, QueueHandler, QueueListener
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import GObject, Gst, GLib
@@ -75,15 +75,21 @@ It parses the arguments and initialized the logger.
 	logRoot.addHandler(logFile)
 
 	# Log mail.
-#logSMTP = SMTPHandler("smtp.googlemail.com", "michael.behman@gmail.com", "michael.behman@gmail.com", "testmail", ("michael.behman@gmail.com", "MB@myGMAILspass"))
-	logSMTP = SMTPHandler(LOG_MAIL_HOST, LOG_MAIL_FROM, LOG_MAIL_TOO, LOG_MAIL_SUBJECT)
+	logSMTP = SMTPHandler(LOG_MAIL_HOST, LOG_MAIL_FROM, LOG_MAIL_TOO, LOG_MAIL_SUBJECT, LOG_MAIL_CRED)
 	logSMTP.setLevel(logging.CRITICAL)
-	logRoot.addHandler(logSMTP)
+	#TODO:formatter
+	logSMTP.setFormatter(logFileFmt)
 
+	SMTPqueue = Queue(-1)
+	logQueueHandler = QueueHandler(SMTPqueue)
+	logQueueListener = QueueListener(SMTPqueue, logSMTP)
+	logQueueHandler.setLevel(logging.CRITICAL)
+	logRoot.addHandler(logQueueHandler)
 	del logRoot
 
 	casys_log = logging.getLogger( 'Main' )
-	casys_log.debug('Logger configured, starting logging.')
+	casys_log.debug('Logger configured. Starting SMTP queue listener.')
+	logQueueListener.start()
 	casys_log.debug('loglevel = {}'.format(args.log))
 
 	casys_log.critical("Test CRITICAL")
@@ -109,6 +115,7 @@ It parses the arguments and initialized the logger.
 	casys_log.warning('Unexpected behavior: End of main reached.')
 
 	#Cleaning:
+	logQueueListener.stop()
 	del casys
 
 def cleaner(casys):
@@ -116,7 +123,7 @@ def cleaner(casys):
 	expireTime = time.time() - VIDEO_EXPIRE_DURATION
 	logger.debug('Deleting files older than: {} ({})'.format(expireTime, time.strftime("%Y/%m/%d %H:%M:%s", time.localtime(expireTime))))
 	for videoFile in os.listdir(VIDEO_STORAGE_PATH):
-		if os.stat(path.join(VIDEO_STORAGE_PATH, videoFile)).st_mtime < expireTime:
+		if os.stat(os.path.join(VIDEO_STORAGE_PATH, videoFile)).st_mtime < expireTime:
 			logger.info('Deleting expired files: ' + videoFile)
 			#TODO: Catch OSError
 			os.remove(videoFile)
@@ -128,8 +135,8 @@ def deleteOld(casys):
 	minimumTime = time.strftime("%Y-%m-%d-%H",time.localtime(time.time() - VIDEO_EXPIRE_DURATION))
 	logger.debug('Deleting files older than: ' + minimumTime)
 	for dev in casys.videoDevices:
-		minimumFile = path.join(VIDEO_STORAGE_PATH, dev + ' ' + minimumTime)
-		for videoFile in iglob( path.join(VIDEO_STORAGE_PATH, dev + '*')):
+		minimumFile = os.path.join(VIDEO_STORAGE_PATH, dev + ' ' + minimumTime)
+		for videoFile in iglob( os.path.join(VIDEO_STORAGE_PATH, dev + '*')):
 			if videoFile < minimumFile:
 				logger.info('Deleting expired video file: ' + videoFile)
 				os.remove(videoFile)
@@ -142,6 +149,18 @@ class LogParse(argparse.Action):
 		setattr(namespace, self.dest, val)
 
 
+def main_wrapper():
+	"""
+	Wrapper for the main function to report uncaught exceptions and re-run main() if CONTINUE_ON_EXCEPTION == True.
+	"""
+	try: main()
+	except:
+		logger = logging.getLogger()
+		logger.critical("Uncaught exception", exc_info=True)
+	finally:
+		if(CONTINUE_ON_EXCEPTION):
+			main_wrapper()
+		
 """Call the main function"""
 if __name__ == "__main__":
-	main()
+	main_wrapper()
