@@ -66,21 +66,27 @@ It parses the arguments and initialized the logger.
 	logging.logProcesses = 0
 	logRoot = logging.getLogger()
 	logRoot.setLevel(logging.DEBUG)
-	#logging.basicConfig(level=args.log, format=args.logformat[0], style='{', filename=args.logfile[0])
+
+	# Log file.
 	logFile = RotatingFileHandler(args.logfile[0], maxBytes=LOG_MAX_FILE, backupCount=LOG_BACK_COUNT)
 	logFile.setLevel(args.log)
 	logFileFmt = logging.Formatter(args.logformat[0], style='{')
 	logFile.setFormatter(logFileFmt)
 	logRoot.addHandler(logFile)
 
-	#smtp = SMTPHandler("smtp.googlemail.com", "michael.behman@gmail.com", "michael.behman@gmail.com", "testmail", ("michael.behman@gmail.com", "MB@myGMAILspass"))
-	#smtp.emit("test")
+	# Log mail.
+#logSMTP = SMTPHandler("smtp.googlemail.com", "michael.behman@gmail.com", "michael.behman@gmail.com", "testmail", ("michael.behman@gmail.com", "MB@myGMAILspass"))
+	logSMTP = SMTPHandler(LOG_MAIL_HOST, LOG_MAIL_FROM, LOG_MAIL_TOO, LOG_MAIL_SUBJECT)
+	logSMTP.setLevel(logging.CRITICAL)
+	logRoot.addHandler(logSMTP)
 
 	del logRoot
 
 	casys_log = logging.getLogger( 'Main' )
 	casys_log.debug('Logger configured, starting logging.')
 	casys_log.debug('loglevel = {}'.format(args.log))
+
+	casys_log.critical("Test CRITICAL")
 
 	GObject.threads_init()
 	Gst.init(None)
