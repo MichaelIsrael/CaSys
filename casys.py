@@ -23,7 +23,7 @@ the V4L2 interface and records their outputs.
 """
 
 import time
-from casyscontrol import CasysControl
+from casysControl import CasysControl
 from casys_const import *
 from glob import iglob
 from os import path
