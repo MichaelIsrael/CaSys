@@ -17,9 +17,9 @@ General:
 Logging and reporting:
 ----------------------
   X  Init logger.
-  _  Use RotatingFileHandler.
-  _  Email on Fatals. (SMTPHandler)
-  _  Use a QueueHandler and a QueueListener for emails.
+  X  Use RotatingFileHandler.
+  X  Email on Fatals. (SMTPHandler)
+  X  Use a QueueHandler and a QueueListener for emails.
   _  Gstreamer bus for logging.
 
 Video capturing:
