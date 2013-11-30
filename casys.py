@@ -25,6 +25,7 @@ the V4L2 interface and records their outputs.
 import time
 from casysControl import CasysControl
 from casys_const import *
+from casysGui import CasysGui
 from glob import iglob
 from queue import Queue
 import os
@@ -94,21 +95,34 @@ It parses the arguments and initialized the logger.
 
 	casys_log.critical("Test CRITICAL")
 
+	casys_log.debug("Initilizing GObject and Gst.")
 	GObject.threads_init()
 	Gst.init(None)
 
 	#TODO: Catch possible exception.
+	casys_log.debug("Creating the CasysControl object.")
 	casys = CasysControl()
+	casys_log.debug("Starting to record.")
 	casys.record()
 
-	mainloop = GLib.MainLoop()
 	#Setting timer:
 	#TODO: Goto beginning of the hour first?
+	casys_log.debug("Adding cleanup and fragmentation timers.")
 	GLib.timeout_add_seconds(5, cleaner, casys)
 	#GLib.timeout_add_seconds(FRAGMENT_TIME, deleteOld, casys)
 	GLib.timeout_add_seconds(FRAGMENT_TIME, casys.fragment)
 
+	#Initialize and show Gui.
+	casys_log.debug("Initializing the casys gui.")
+	gui = CasysGui()
+	casys_log.debug("Showing the Gui.")
+	gui.show()
+	casys_log.debug('Preparing video view for 1 camera.')
+	gui.prepareView()
+
 	#Main loop:
+	casys_log.debug("Running the GLib Mainloop.")
+	mainloop = GLib.MainLoop()
 	mainloop.run()
 
 	#Main loop stopped.

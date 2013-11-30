@@ -45,7 +45,7 @@ System:
 
 Interface:
 ----------
-  _  Basic interface to view cameras on a display.
+  B  Basic interface to view cameras on a display.
   _  Divided display for four cameras.
   _  Display generic number of cameras.
 
