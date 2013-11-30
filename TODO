@@ -3,6 +3,7 @@ BUGS:
   X  Video files for old devices are never removed.
   X  Time used is one hour old (Maybe because of DST) [Using localtime() instead of gmtime()]
   X  Forever growing log file.
+  _  Exception is raised when the videos folder does not exist (should create it).
 
 General:
 --------
