@@ -22,28 +22,54 @@ This is the gui of Casys.
 
 import gi
 from gi.repository import GObject, Gtk, GdkX11
+import logging
 
+#class CasysGui(Gtk.Application):
 class CasysGui():
 	def __init__(self):
-		self.window = Gtk.Window()
-		self.window.set_resizable(False)
-		self.window.fullscreen()
+		self.__logger = logging.getLogger('CasysGui')
+		self.__logger.debug('Creating window.')
+		self.__window = Gtk.Window()
+		self.__window.set_resizable(False)
+		self.__window.fullscreen()
 
 	def show(self):
-		self.window.show_all()
+		self.__logger.debug('Showing window.')
+		self.__window.show_all()
+		print(self.__window.get_property('window').get_xid())
 
-	def prepareView(self, number=1):
+	def prepareView(self, horizontal=1, vertical=1):
+		self.__logger.debug('Preparing video view.')
+		if horizontal < 1 or vertical < 1:
+			raise ValueError('The number of views must be bigger than 0. ({}, {}) were provided'.format(horizontal, vertical))
+
 		if hasattr(self, "__videoTable"):
-			self.window.remove(self.__videoTable)
+			self.__logger.debug('Removing old view.')
+			self.__window.remove(self.__videoTable)
 			del self.__videoTable
-		xids = []
-		self.__videoTable = Gtk.Table(1, 1, True)
-		self.window.add(self.__videoTable)
-		videoArea = Gtk.DrawingArea()
-		self.__videoTable.attach(videoArea, 0, 1, 0, 1)
-		xid = videoArea.get_property('window').get_xid()
-		xids.append(xid)
-		return xids
 
+		xids = []
+
+		self.__logger.debug('Creating main table accoding to the provided numbers: ({}, {}).'.format(horizontal, vertical))
+		self.__videoTable = Gtk.Table(vertical, horizontal, True)
+		self.__window.add(self.__videoTable)
+
+		coord = ((0,0),(600,600))
+
+		for yIndex in range(vertical):
+			for xIndex in range(horizontal):
+				self.__logger.debug('Creating a video area for ({}, {}).'.format(xIndex, yIndex))
+				videoArea = Gtk.DrawingArea()
+				self.__videoTable.attach(videoArea, xIndex, xIndex + 1, yIndex, yIndex + 1)
+				xid = videoArea.get_property('window').get_xid()
+				xids.append(xid)
+
+		self.__window.show_all()
+
+		return [xids, coord]
+
+	def main(self):
+		Gtk.main()
+		self.run("")
 
 

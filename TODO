@@ -4,6 +4,7 @@ BUGS:
   X  Time used is one hour old (Maybe because of DST) [Using localtime() instead of gmtime()]
   X  Forever growing log file.
   _  Exception is raised when the videos folder does not exist (should create it).
+  _  Unstable mail logging.
 
 General:
 --------
@@ -21,21 +22,23 @@ Logging and reporting:
   X  Use RotatingFileHandler.
   X  Email on Fatals. (SMTPHandler)
   X  Use a QueueHandler and a QueueListener for emails.
-  _  Gstreamer bus for logging.
+  X  Gstreamer bus for logging.
 
 Video capturing:
 ----------------
   X  Automatic video devices detect. /dev/video$Name
   X  Creating a different pipeline for each detected device.
-  B  Build video objects with iterators.
-  B  Gstreamer pipelines to files.
+  X  Build video objects with iterators.
+  X  Gstreamer pipelines to files.
   B  Timer and chunking files.
+  _  Hot-pluging new cameras on the fly.
 
 Streaming:
 ----------
   _  RTSP Streaming. 
   _  RTSP with authentication.
   _  Hot-pluging streaming bin.
+  _  Stream viewer (client).
 
 System:
 -------
@@ -45,9 +48,9 @@ System:
 
 Interface:
 ----------
-  B  Basic interface to view cameras on a display.
-  _  Divided display for four cameras.
-  _  Display generic number of cameras.
+  X  Basic interface to view cameras on a display.
+  X  Divided display for four cameras.
+  B  Display generic number of cameras.
 
 Control:
 --------
