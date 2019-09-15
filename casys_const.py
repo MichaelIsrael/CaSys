@@ -16,9 +16,10 @@ LOG_BACK_COUNT = 5
 
 LOG_MAIL_HOST = "localhost"
 LOG_MAIL_FROM = "log@casys"
-LOG_MAIL_TOO = "michael.behman@gmail.com"
+LOG_MAIL_TO = "michael.behman@gmail.com"
 LOG_MAIL_SUBJECT = "Casys Critical error"
 LOG_MAIL_CRED = None
+LOG_MAIL_ENCODING = 'utf-32'
 
 VIDEO_DEV_FILES_PATTERN = '/dev/video*'
 VIDEO_STORAGE_PATH = './videos'

@@ -36,7 +36,6 @@ class CasysGui():
 	def show(self):
 		self.__logger.debug('Showing window.')
 		self.__window.show_all()
-		print(self.__window.get_property('window').get_xid())
 
 	def prepareView(self, horizontal=1, vertical=1):
 		self.__logger.debug('Preparing video view.')
@@ -54,6 +53,7 @@ class CasysGui():
 		self.__videoTable = Gtk.Table(vertical, horizontal, True)
 		self.__window.add(self.__videoTable)
 
+		#TODO: Coord?
 		coord = ((0,0),(600,600))
 
 		for yIndex in range(vertical):

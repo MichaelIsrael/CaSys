@@ -49,13 +49,13 @@ class CasysControl:
 			try:
 				casysDev.CreatePipeline()
 			except (CreateElementError, AddToPipelineError, LinkingElementsError):
-				self.__logger.exception('An error was encountered while creating a CasysDevice for ' +  devFile)
+				self.__logger.critical('An error was encountered while creating a CasysDevice for ' +  devFile, exc_info=True)
 				del casysDev
 				continue
 
 			self.__deviceList.append(casysDev)
 
-		self.__logger.debug("{} new camera devices were detected.".format(len(self.__deviceList)))
+		self.__logger.debug("Currently {} detected camera devices.".format(len(self.__deviceList)))
 
 
 	def __getitem__(self, key):
@@ -66,11 +66,11 @@ class CasysControl:
 		return key in self.__deviceList
 
 
-	def getNumberOfDevices(self):
+	def __len__(self):
 		return len(self.__deviceList)
 
 
-	def connect(self, device, xid):
+	def connect(self, xid, device=None):
 		if device:
 			if type(device) is self.CasysDevice:
 				device.connectGui(xid)
@@ -581,7 +581,7 @@ class CasysControl:
 
 			elif msg_name == 'GstMessageWarning':
 				[gerr, debug] = msg.parse_warning()
-				self.__logger.warning("GstMessage {}: WARNING {} from {}: {}\n->{}".format(msg.seqnum, msg.src.get_name(), gerr.code, gerr.message, debug))
+				self.__logger.warning("GstMessage {}: WARNING {} from {}: {}\n->{}".format(msg.seqnum, gerr.code, msg.src.get_name(), gerr.message, debug))
 
 			elif msg_name == 'GstMessageStreamStart':
 				self.__logger.info("GstMessage {}: Stream-Start received from {}".format(msg.seqnum, msg.src.get_name()))
@@ -589,6 +589,10 @@ class CasysControl:
 			elif msg_name == 'GstMessageQOS':
 				#TODO: Implement.
 				self.__logger.info("GstMessage {}: QOS of {}".format(msg.seqnum, msg.src.get_name()))
+
+			elif msg_name == 'GstMessageError':
+				[gerr, debug] = msg.parse_error()
+				self.__logger.critical("GstMessage {}: Error {} in {}:\n{}\n  -->{}".format(msg.seqnum, gerr.code, msg.src.get_name(), gerr.message, debug))
 
 			else:
 				mstruct = msg.get_structure()

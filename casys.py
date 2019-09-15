@@ -22,17 +22,22 @@ board (or any other board that runs GNU/Linux). Casys detects connected Video Ca
 the V4L2 interface and records their outputs.
 """
 
-import time
 from casysControl import CasysControl
 from casys_const import *
 from casysGui import CasysGui
+
+import os
+import argparse
+import sys
 from glob import iglob
 from queue import Queue
-import os
-import sys
-import argparse
+from time import strftime, localtime, time, sleep
+from io import IOBase
+from tempfile import TemporaryFile
+
 import logging
 from logging.handlers import RotatingFileHandler, SMTPHandler, QueueHandler, QueueListener
+
 import gi
 gi.require_version('Gst', '1.0')
 from gi.repository import GObject, Gst, GLib
@@ -70,16 +75,30 @@ It parses the arguments and initialized the logger.
 
 	# Log file.
 	logFile = RotatingFileHandler(args.logfile[0], maxBytes=LOG_MAX_FILE, backupCount=LOG_BACK_COUNT)
+	logRoot.addHandler(logFile)
+
+	# Start of session
+	logRoot.info("========================================================================================================================")
+	logRoot.info("                                        New session started (%s)" % strftime("%Y/%m/%d %H:%M:%S", localtime()))
+	logRoot.info("========================================================================================================================")
+
+	# Setting up format and level.
 	logFile.setLevel(args.log)
 	logFileFmt = logging.Formatter(args.logformat[0], style='{')
 	logFile.setFormatter(logFileFmt)
-	logRoot.addHandler(logFile)
+
+
+	sys.stderr = StdToLog("StdErr", logging.ERROR)
+	sys.stdout = StdToLog("StdOut", logging.WARN)
 
 	# Log mail.
-	logSMTP = SMTPHandler(LOG_MAIL_HOST, LOG_MAIL_FROM, LOG_MAIL_TOO, LOG_MAIL_SUBJECT, LOG_MAIL_CRED)
+	logSMTP = SMTPHandler(LOG_MAIL_HOST, LOG_MAIL_FROM, LOG_MAIL_TO, LOG_MAIL_SUBJECT, LOG_MAIL_CRED, timeout=15)
+	#TODO: What about exceptions?
 	logSMTP.setLevel(logging.CRITICAL)
+
 	#TODO:formatter
-	logSMTP.setFormatter(logFileFmt)
+	SMTPFmt = SMTPFormatter(args.logformat[0], style='{')
+	logSMTP.setFormatter(SMTPFmt)
 
 	SMTPqueue = Queue(-1)
 	logQueueHandler = QueueHandler(SMTPqueue)
@@ -93,13 +112,18 @@ It parses the arguments and initialized the logger.
 	logQueueListener.start()
 	casys_log.debug('loglevel = {}'.format(args.log))
 
-	casys_log.critical("Test CRITICAL")
+	casys_log.info("Basic initialization.")
 
+	casys_log.debug("Checking the videos' directory.")
+	try:
+		CheckVideoDirectory()
+	except:
+		casys_log.critical("An exception was raised while setting videos' directory", exc_info=True)
+		
 	casys_log.debug("Initilizing GObject and Gst.")
 	GObject.threads_init()
 	Gst.init(None)
 
-	#TODO: Catch possible exception.
 	casys_log.debug("Creating the CasysControl object.")
 	casys = CasysControl()
 	casys_log.debug("Starting to record.")
@@ -109,16 +133,21 @@ It parses the arguments and initialized the logger.
 	#TODO: Goto beginning of the hour first?
 	casys_log.debug("Adding cleanup and fragmentation timers.")
 	GLib.timeout_add_seconds(5, cleaner, casys)
-	#GLib.timeout_add_seconds(FRAGMENT_TIME, deleteOld, casys)
-	GLib.timeout_add_seconds(FRAGMENT_TIME, casys.fragment)
+	GLib.timeout_add_seconds(FRAGMENT_TIME, casys.Fragment)
 
 	#Initialize and show Gui.
 	casys_log.debug("Initializing the casys gui.")
 	gui = CasysGui()
 	casys_log.debug("Showing the Gui.")
 	gui.show()
-	casys_log.debug('Preparing video view for 1 camera.')
-	gui.prepareView()
+	casys_log.debug('Preparing video view for the found cameras.')
+	num = len(casys)
+	#TODO: Better view.
+	[xids,coord] = gui.prepareView(num, 1)
+
+	sleep(1.5)
+	casys.connect(xids)
+	#sleep(1.5)
 
 	#Main loop:
 	casys_log.debug("Running the GLib Mainloop.")
@@ -132,29 +161,43 @@ It parses the arguments and initialized the logger.
 	logQueueListener.stop()
 	del casys
 
+
 def cleaner(casys):
 	logger = logging.getLogger('Cleaner')
-	expireTime = time.time() - VIDEO_EXPIRE_DURATION
-	logger.debug('Deleting files older than: {} ({})'.format(expireTime, time.strftime("%Y/%m/%d %H:%M:%s", time.localtime(expireTime))))
-	for videoFile in os.listdir(VIDEO_STORAGE_PATH):
-		if os.stat(os.path.join(VIDEO_STORAGE_PATH, videoFile)).st_mtime < expireTime:
-			logger.info('Deleting expired files: ' + videoFile)
-			#TODO: Catch OSError
-			os.remove(videoFile)
+	expireTime = time() - VIDEO_EXPIRE_DURATION
+	logger.debug('Deleting files older than: {} ({})'.format(expireTime, strftime("%Y/%m/%d %H:%M:%S", localtime(expireTime))))
+	try:
+		for videoFile in os.listdir(VIDEO_STORAGE_PATH):
+			videoFile = os.path.join(VIDEO_STORAGE_PATH, videoFile)
+			if os.stat(videoFile).st_mtime < expireTime:
+				logger.info('Deleting expired files: ' + videoFile)
+				try:
+					os.remove(videoFile)
+				except OSError:
+					logger.exception("Failed to clean videos' directory.")
+				finally:
+					return True
+	except FileNotFoundError:
+		logger.exception("An error occured while running cleaner")
+	finally:
+		return True
+
+def CheckVideoDirectory():
+	logger = logging.getLogger('CheckVideoDirectory')
+	logger.debug("Attempting to create a 'dummy' file in the videos' directory")
+	try:
+		TmpFile = TemporaryFile(dir=VIDEO_STORAGE_PATH)
+		TmpFile.close()
+	except FileNotFoundError:
+		logger.info("Video directory does not exist. Creating it, and reruning the check.")
+		os.mkdir(VIDEO_STORAGE_PATH, 0o755)
+		CheckVideoDirectory()
+	except PermissionError:
+		logger.info("No write permission for the video directory. Attempting to fix, and reruning the check.")
+		os.chmod(VIDEO_STORAGE_PATH, 0o755)
+		CheckVideoDirectory()
 
 
-
-def deleteOld(casys):
-	logger = logging.getLogger('deleteOld')
-	minimumTime = time.strftime("%Y-%m-%d-%H",time.localtime(time.time() - VIDEO_EXPIRE_DURATION))
-	logger.debug('Deleting files older than: ' + minimumTime)
-	for dev in casys.videoDevices:
-		minimumFile = os.path.join(VIDEO_STORAGE_PATH, dev + ' ' + minimumTime)
-		for videoFile in iglob( os.path.join(VIDEO_STORAGE_PATH, dev + '*')):
-			if videoFile < minimumFile:
-				logger.info('Deleting expired video file: ' + videoFile)
-				os.remove(videoFile)
-	return True
 
 
 class LogParse(argparse.Action):
@@ -163,18 +206,39 @@ class LogParse(argparse.Action):
 		setattr(namespace, self.dest, val)
 
 
+class SMTPFormatter(logging.Formatter):
+	def format(self, record):
+		"""
+		Overriding the format function to force encoding. Otherwise an exception could be throwen
+		"""
+		result = logging.Formatter.format(self, record)
+		if isinstance(result, str):
+		    result = result.encode(LOG_MAIL_ENCODING)
+		return result
+
+
+class StdToLog(IOBase):
+	def __init__(self, name, level):
+		self.logger = logging.getLogger(name)
+		self.level = level
+
+	def write(self, msg):
+		if msg != "\n":
+			self.logger.log(self.level, msg)
+
 def main_wrapper():
 	"""
 	Wrapper for the main function to report uncaught exceptions and re-run main() if CONTINUE_ON_EXCEPTION == True.
 	"""
 	try: main()
 	except:
-		logger = logging.getLogger()
+		logger = logging.getLogger("main_wrapper")
 		logger.critical("Uncaught exception", exc_info=True)
 	finally:
 		if(CONTINUE_ON_EXCEPTION):
 			main_wrapper()
 		
+
 """Call the main function"""
 if __name__ == "__main__":
 	main_wrapper()
