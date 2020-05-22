@@ -320,10 +320,7 @@ class CasysDevice(CasysObject):
                                    )
         self._pipeline.add_element('tee', 'Tee_'+self.DeviceName)
         self._pipeline.add_element('queue', 'FileQueue_'+self.DeviceName)
-        self._pipeline.add_element('videoconvert',
-                                   'VideoConvert_'+self.DeviceName)
-        self._pipeline.add_element('theoraenc', 'Encoder_'+self.DeviceName)
-        self._pipeline.add_element('oggmux', 'Mux_'+self.DeviceName)
+        self._pipeline.add_element('matroskamux', 'Mux_'+self.DeviceName)
         self._pipeline.add_element('filesink',
                                    'File_'+self.DeviceName,
                                    location=self.__createFileName(),
