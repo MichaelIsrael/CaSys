@@ -19,57 +19,58 @@
 """
 This is the gui of Casys.
 """
+import logging
 
 import gi
+gi.require_version('Gtk', '3.0')
 from gi.repository import GObject, Gtk, GdkX11
-import logging
 
 #class CasysGui(Gtk.Application):
 class CasysGui():
-	def __init__(self):
-		self.__logger = logging.getLogger('CasysGui')
-		self.__logger.debug('Creating window.')
-		self.__window = Gtk.Window()
-		self.__window.set_resizable(False)
-		self.__window.fullscreen()
+    def __init__(self):
+        self.__logger = logging.getLogger('CasysGui')
+        self.__logger.debug('Creating window.')
+        self.__window = Gtk.Window()
+        self.__window.set_resizable(False)
+        # self.__window.fullscreen()
 
-	def show(self):
-		self.__logger.debug('Showing window.')
-		self.__window.show_all()
+    def show(self):
+        self.__logger.debug('Showing window.')
+        self.__window.show_all()
 
-	def prepareView(self, horizontal=1, vertical=1):
-		self.__logger.debug('Preparing video view.')
-		if horizontal < 1 or vertical < 1:
-			raise ValueError('The number of views must be bigger than 0. ({}, {}) were provided'.format(horizontal, vertical))
+    def prepareView(self, horizontal=1, vertical=1):
+        self.__logger.debug('Preparing video view.')
+        if horizontal < 1 or vertical < 1:
+            raise ValueError('The number of views must be bigger than 0. ({}, {}) were provided'.format(horizontal, vertical))
 
-		if hasattr(self, "__videoTable"):
-			self.__logger.debug('Removing old view.')
-			self.__window.remove(self.__videoTable)
-			del self.__videoTable
+        if hasattr(self, "__videoTable"):
+            self.__logger.debug('Removing old view.')
+            self.__window.remove(self.__videoTable)
+            del self.__videoTable
 
-		xids = []
+        xids = []
 
-		self.__logger.debug('Creating main table accoding to the provided numbers: ({}, {}).'.format(horizontal, vertical))
-		self.__videoTable = Gtk.Table(vertical, horizontal, True)
-		self.__window.add(self.__videoTable)
+        self.__logger.debug('Creating main table accoding to the provided numbers: ({}, {}).'.format(horizontal, vertical))
+        self.__videoTable = Gtk.Table(vertical, horizontal, True)
+        self.__window.add(self.__videoTable)
 
-		#TODO: Coord?
-		coord = ((0,0),(600,600))
+        #TODO: Coord?
+        coord = ((0,0),(600,600))
 
-		for yIndex in range(vertical):
-			for xIndex in range(horizontal):
-				self.__logger.debug('Creating a video area for ({}, {}).'.format(xIndex, yIndex))
-				videoArea = Gtk.DrawingArea()
-				self.__videoTable.attach(videoArea, xIndex, xIndex + 1, yIndex, yIndex + 1)
-				xid = videoArea.get_property('window').get_xid()
-				xids.append(xid)
+        for yIndex in range(vertical):
+            for xIndex in range(horizontal):
+                self.__logger.debug('Creating a video area for ({}, {}).'.format(xIndex, yIndex))
+                videoArea = Gtk.DrawingArea()
+                self.__videoTable.attach(videoArea, xIndex, xIndex + 1, yIndex, yIndex + 1)
+                xid = videoArea.get_property('window').get_xid()
+                xids.append(xid)
 
-		self.__window.show_all()
+        self.__window.show_all()
 
-		return [xids, coord]
+        return [xids, coord]
 
-	def main(self):
-		Gtk.main()
-		self.run("")
+    def main(self):
+        Gtk.main()
+        self.run("")
 
 
