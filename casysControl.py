@@ -20,6 +20,8 @@ import logging
 from glob import iglob
 from os import path
 from time import localtime, strftime
+from casysabstraction import CasysObject, CasysBaseError
+
 import gi
 gi.require_version('Gst', '1.0')
 gi.require_version('GstVideo', '1.0')
@@ -30,8 +32,9 @@ GObject.threads_init()
 Gst.init(None)
 
 
-class CasysControl(object):
+class CasysControl(CasysObject):
     def __init__(self):
+        super().__init__()
         self.__logger = logging.getLogger('CasysControl')
         self.__logger.debug('Initializing a CasysControl object.')
         self.__deviceList = CasysDevicesList()
@@ -190,13 +193,16 @@ class CasysControl(object):
         self.__logger.debug('Iterator of the device list.')
         return iter(self.__deviceList)
 
+    def free(self):
+        pass
 
-class CasysDevicesList(list):
+
+class CasysDevicesList(list, CasysObject):
     def __init__(self):
+        super().__init__()
         # self.__logger = logging.getLogger('CasysDeviceList')
         self.__names = []
         self.__paths = []
-        list.__init__(self)
 
     def __getitem__(self, key):
         if type(key) is str:
@@ -229,10 +235,69 @@ class CasysDevicesList(list):
         self.__paths.append(element.DevicePath)
         list.append(self, element)
 
+    def free(self):
+        pass
 
-class CasysDevice(object):
+
+class CasysDevicePipeline(CasysObject):
+    def __init__(self, name):
+        super().__init__()
+        self._name = name
+        self._logger = logging.getLogger('Casys.Pipeline.' + str(name))
+
+        self._logger.info("Creating a new instance of CasysDevicePipeline.")
+        self._logger.debug("Creating GstPipeline")
+        self._gstpipeline = Gst.Pipeline.new(name)
+        if not self._gstpipeline:
+            self._logger.critical("Failed to Create GstPipeline")
+            raise CreateElementError("pipeline")
+
+    def free(self):
+        self._logger.info("Freeing object.")
+        Gst.Object.unref(self._pipeline)
+
+    def get_bus(self):
+        return self._gstpipeline.get_bus()
+
+    def set_state(self, *args, **kwargs):
+        return self._gstpipeline.set_state(*args, **kwargs)
+
+    def add_element(self,
+                    element_type,
+                    element_name,
+                    link_to_last=False,
+                    **properties):
+        self._logger.info("Adding new element {} ({}: {}).".format(
+                element_name, element_type, properties))
+        element = Gst.ElementFactory.make(
+            element_type, element_name)
+
+        for key, value in properties.items():
+            try:
+                element.set_property(key, value)
+            except TypeError:
+                raise CreateElementError(element_type) from None
+
+        if not self._gstpipeline.add(element):
+            raise AddToPipelineError(element_type)
+
+        try:
+            last = self._last_element
+        except AttributeError:
+            pass
+        else:
+            if not last.link(element):
+                raise LinkingElementsError(last, element)
+        finally:
+            self._last_element = element
+
+        return element
+
+
+class CasysDevice(CasysObject):
     def __init__(self, devFile):
-        # TODO: Check existance of rely on creator?
+        super().__init__()
+        # TODO: Check existance or rely on creator?
         self.__logger = logging.getLogger('CasysDevice ' + str(devFile))
         self.__logger.debug('Initializing a new instance of CasysDevice')
         self.DevicePath = devFile
@@ -241,366 +306,38 @@ class CasysDevice(object):
     def CreatePipeline(self):
         # Creating Gstreamer elements.
         self.__logger.debug('Creating pipeline-elements.')
-
-        camera = Gst.ElementFactory.make('v4l2src', 'Camera' + self.DeviceName)
-        if camera is None:
-            self.__logger.critical('Failed to create element: camera (v4l2src)')
-            raise CreateElementError('v4l2src')
-
-        clock = Gst.ElementFactory.make('clockoverlay', 'Clock' + self.DeviceName)
-        if clock is None:
-            self.__logger.critical('Failed to create element: clockoverlay')
-            Gst.Object.unref(camera)
-            raise CreateElementError('clockoverlay')
-
-        title = Gst.ElementFactory.make('textoverlay', 'Title' + self.DeviceName)
-        if title is None:
-            self.__logger.critical('Failed to create element: textoverlay')
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            raise CreateElementError('textoverlay')
-
-        tee = Gst.ElementFactory.make('tee', 'Tee' + self.DeviceName)
-        if tee is None:
-            self.__logger.critical('Failed to create element: tee')
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            raise CreateElementError('tee')
-
-        queue = Gst.ElementFactory.make('queue', 'FileQueue' + self.DeviceName)
-        if queue is None:
-            self.__logger.critical('Failed to create element: queue')
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            raise CreateElementError('queue')
-
-        encoder = Gst.ElementFactory.make('theoraenc', 'Encoder' + self.DeviceName)
-        if encoder is None:
-            self.__logger.critical('Failed to create element: encoder (theoraenc)')
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            raise CreateElementError('theoraenc')
-
-        mux = Gst.ElementFactory.make('oggmux', 'Mux' + self.DeviceName)
-        if mux is None:
-            self.__logger.critical('Failed to create element: mux (oggmux)')
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            raise CreateElementError('oggmux')
-
-        outfile = Gst.ElementFactory.make('filesink', 'File' + self.DeviceName)
-        if outfile is None:
-            self.__logger.critical('Failed to create element: outfile (filesink)')
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            raise CreateElementError('filesink')
-
-        vidconv = Gst.ElementFactory.make('videoconvert', 'VideoConvert' + self.DeviceName)
-        if vidconv is None:
-            self.__logger.critical('Failed to create element: vidconv (Vidoconvert)')
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            raise CreateElementError('filesink')
-
-        # Configuring elements.
-        camera.set_property('device', self.DevicePath)
-        title.set_property('text', self.DeviceName)
-        title.set_property('valignment', "top")
-        title.set_property('halignment', "right")
-        outfile.set_property('location', self.__createFileName())
-
-        # Creating the pipeline.
-        self.__logger.debug('Creating pipeline.')
-        self.__pipeline = Gst.Pipeline()
-
-        if self.__pipeline is None:
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            raise CreateElementError('Pipeline')
-
-        self.__pipeline.set_name('Pipeline' + self.DeviceName)
+        self._pipeline = CasysDevicePipeline('Pipeline_' + self.DeviceName)
+        self._pipeline.add_element('v4l2src',
+                                   'Camera_'+self.DeviceName,
+                                   device=self.DevicePath,
+                                   )
+        self._pipeline.add_element('clockoverlay', 'Clock_'+self.DeviceName)
+        self._pipeline.add_element('textoverlay',
+                                   'Title_'+self.DeviceName,
+                                   text=self.DeviceName,
+                                   valignment="top",
+                                   halignment="right",
+                                   )
+        self._pipeline.add_element('tee', 'Tee_'+self.DeviceName)
+        self._pipeline.add_element('queue', 'FileQueue_'+self.DeviceName)
+        self._pipeline.add_element('videoconvert',
+                                   'VideoConvert_'+self.DeviceName)
+        self._pipeline.add_element('theoraenc', 'Encoder_'+self.DeviceName)
+        self._pipeline.add_element('oggmux', 'Mux_'+self.DeviceName)
+        self._pipeline.add_element('filesink',
+                                   'File_'+self.DeviceName,
+                                   location=self.__createFileName(),
+                                   )
 
         # Getting the bus.
         self.__logger.debug('Getting the bus of this pipeline.')
-        bus = self.__pipeline.get_bus()
-        bus.set_name("Bus" + self.DeviceName)
+        bus = self._pipeline.get_bus()
+        bus.set_name("Bus_"+self.DeviceName)
 
         # Connecting the bus to the handler.
         # FIXME: the following causes problems
-        bus.add_signal_watch()
+        # bus.add_signal_watch()
         bus.connect('message', self.__message_handler)
-
-        # Adding the elements to the pipeline.
-        self.__logger.debug('Adding the elements to the pipeline.')
-        if not self.__pipeline.add(camera):
-            self.__logger.critical("Failed to add element 'camera' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("v4l2src")
-
-        if not self.__pipeline.add(clock):
-            self.__logger.critical("Failed to add element 'clock' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("clockoverlay")
-
-        if not self.__pipeline.add(title):
-            self.__logger.critical("Failed to add element 'title' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("textoverlay")
-
-        if not self.__pipeline.add(tee):
-            self.__logger.critical("Failed to add element 'tee' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("tee")
-
-        if not self.__pipeline.add(queue):
-            self.__logger.critical("Failed to add element 'queue' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("queue")
-
-        if not self.__pipeline.add(encoder):
-            self.__logger.critical("Failed to add element 'encoder' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("theoraenc")
-
-        if not self.__pipeline.add(mux):
-            self.__logger.critical("Failed to add element 'mux' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("oggmux")
-
-        if not self.__pipeline.add(vidconv):
-            self.__logger.critical("Failed to add element 'vidconv' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("vidconv")
-
-        if not self.__pipeline.add(outfile):
-            self.__logger.critical("Failed to add element 'outfile' to the pipeline.")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise AddToPipelineError("filesink")
-
-        # Linking the elements.
-        self.__logger.debug('Linking the elements.')
-        if not camera.link(clock):
-            self.__logger.critical("Failed to link elements: Camera and Clock")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("v4l2src", "clockoverlay")
-
-        self.__logger.debug('Linking the elements.')
-        if not clock.link(title):
-            self.__logger.critical("Failed to link elements: Clock and Title")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("clockoverlay", "textoverlay")
-
-        if not title.link(tee):
-            self.__logger.critical("Failed to link elements: Clock and Tee")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("clockoverlay",  "tee")
-
-
-        if not tee.link(queue):
-            self.__logger.critical("Failed to link elements: Tee and Queue")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("tee", "queue")
-
-        if not queue.link(vidconv):
-            self.__logger.critical("Failed to link elements: Queue and Encoder")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("queue", "theoraenc")
-
-        if not vidconv.link(encoder):
-            self.__logger.critical("Failed to link elements: Queue and Encoder")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("queue", "theoraenc")
-
-        if not encoder.link(mux):
-            self.__logger.critical("Failed to link elements: Encoder and Mux")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("theoraenc", "oggmux")
-
-        if not mux.link(outfile):
-            self.__logger.critical("Failed to link elements: Mux and OutFile")
-            Gst.Object.unref(camera)
-            Gst.Object.unref(clock)
-            Gst.Object.unref(title)
-            Gst.Object.unref(tee)
-            Gst.Object.unref(queue)
-            Gst.Object.unref(encoder)
-            Gst.Object.unref(mux)
-            Gst.Object.unref(outfile)
-            Gst.Object.unref(vidconv)
-            Gst.Object.unref(self.__pipeline)
-            raise LinkingElementsError("oggmux", "filesink")
 
     def __message_handler(self, bus, msg):
         # TODO: Another logger with name BUS amd device?
@@ -651,7 +388,8 @@ class CasysDevice(object):
 
     def connectGui(self, xid):
         self.__logger.debug("Connecting to XID: " + str(xid))
-
+        # TODO
+        """
         self.__logger.debug("Geting the tee element from the pipeline")
         tee = self.__pipeline.get_by_name('Tee' + self.DeviceName)
         if tee is None:
@@ -678,30 +416,38 @@ class CasysDevice(object):
         sink.set_window_handle(xid)
 
         self.__logger.debug("Setting the whole pipeline to playing.")
-        self.__pipeline.set_state(Gst.State.PLAYING)
+        self._pipeline.set_state(Gst.State.PLAYING)
+        """
 
     def Stop(self):
         self.__logger.debug('Stoping device.')
-        if hasattr(self, "__pipeline"):
-            self.__pipeline.set_state(Gst.State.NULL)
+        try:
+            self._pipeline.set_state(Gst.State.NULL)
+        except AttributeError:
+            pass
 
     def Start(self):
         self.__logger.debug("Playing device.")
-        self.__pipeline.set_state(Gst.State.PLAYING)
+        self._pipeline.set_state(Gst.State.PLAYING)
 
     def Fragment(self):
         self.__logger.debug("Fragmenting video files")
+        # TODO
+        """
         outfile = self.__pipeline.get_by_name('File' + self.DeviceName)
         NewName = self.__createFileName()
         self.Stop()
         outfile.set_property('location', NewName)
         self.Start()
+        """
 
-    def __del__(self):
+    def free(self):
         self.__logger.debug('Deleting the CasysDevice')
         self.Stop()
-        if hasattr(self, "__pipeline"):
-            Gst.Object.unref(self.__pipeline)
+        try:
+            self._pipeline.free()
+        except AttributeError:
+            pass
 
     def __createFileName(self):
         current_time = strftime("%Y-%m-%d-%H", localtime())
@@ -722,11 +468,7 @@ class CasysDevice(object):
             i += 1
 
 
-class CasysError(Exception):
-    pass
-
-
-class CreateElementError(CasysError):
+class CreateElementError(CasysBaseError):
     def __init__(self, Name=None):
         self.__name = str(Name)
 
@@ -737,7 +479,7 @@ class CreateElementError(CasysError):
             return "Error occured while creating element {}.".format(self.__name)
 
 
-class AddToPipelineError(CasysError):
+class AddToPipelineError(CasysBaseError):
     def __init__(self, Name=None):
         self.__name = str(Name)
 
@@ -748,7 +490,7 @@ class AddToPipelineError(CasysError):
             return "Error occured while adding element '{}' to the pipeline.".format(self.__name)
 
 
-class LinkingElementsError(CasysError):
+class LinkingElementsError(CasysBaseError):
     def __init__(self, SourceElement=None, DestinationElement=None):
         self.__srcElement = str(SourceElement)
         self.__destElement = str(DestinationElement)
