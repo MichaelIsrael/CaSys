@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright 2013-2014 Michael Israel
+# Copyright 2013-2020 Michael Israel
 #
 # This file is part of Casys.
 #
@@ -87,10 +87,10 @@ It parses the arguments and initialized the logger.
     logFileFmt = logging.Formatter(args.logformat[0], style='{')
     logFile.setFormatter(logFileFmt)
 
+    # sys.stderr = StdToLog("StdErr", logging.ERROR)
+    # sys.stdout = StdToLog("StdOut", logging.WARN)
 
-    sys.stderr = StdToLog("StdErr", logging.ERROR)
-    sys.stdout = StdToLog("StdOut", logging.WARN)
-
+    """
     # Log mail.
     logSMTP = SMTPHandler(LOG_MAIL_HOST, LOG_MAIL_FROM, LOG_MAIL_TO, LOG_MAIL_SUBJECT, LOG_MAIL_CRED, timeout=15)
     #TODO: What about exceptions?
@@ -106,10 +106,11 @@ It parses the arguments and initialized the logger.
     logQueueHandler.setLevel(logging.CRITICAL)
     logRoot.addHandler(logQueueHandler)
     del logRoot
+    """
 
-    casys_log = logging.getLogger( 'Main' )
+    casys_log = logging.getLogger('Casys')
     casys_log.debug('Logger configured. Starting SMTP queue listener.')
-    logQueueListener.start()
+    # logQueueListener.start()
     casys_log.debug('loglevel = {}'.format(args.log))
 
     casys_log.info("Basic initialization.")
@@ -119,10 +120,6 @@ It parses the arguments and initialized the logger.
         CheckVideoDirectory()
     except:
         casys_log.critical("An exception was raised while setting videos' directory", exc_info=True)
-        
-    casys_log.debug("Initilizing GObject and Gst.")
-    GObject.threads_init()
-    Gst.init(None)
 
     casys_log.debug("Creating the CasysControl object.")
     casys = CasysControl()
@@ -138,12 +135,10 @@ It parses the arguments and initialized the logger.
     #Initialize and show Gui.
     casys_log.debug("Initializing the casys gui.")
     gui = CasysGui()
-    casys_log.debug("Showing the Gui.")
-    gui.show()
     casys_log.debug('Preparing video view for the found cameras.')
     num = len(casys)
     #TODO: Better view.
-    [xids,coord] = gui.prepareView(num, 1)
+    xids = gui.prepareView(num, 1)
 
     sleep(1.5)
     casys.connect(xids)
@@ -151,15 +146,16 @@ It parses the arguments and initialized the logger.
 
     #Main loop:
     casys_log.debug("Running the GLib Mainloop.")
-    mainloop = GLib.MainLoop()
-    mainloop.run()
+    gui.main()
+    # mainloop = GLib.MainLoop()
+    # mainloop.run()
 
-    #Main loop stopped.
+    # Main loop stopped.
     casys_log.warning('Unexpected behavior: End of main reached.')
 
-    #Cleaning:
-    logQueueListener.stop()
-    del casys
+    # Cleaning:
+    # logQueueListener.stop()
+    # del casys
 
 
 def cleaner(casys):
