@@ -21,6 +21,8 @@ from glob import iglob
 from os import path
 from time import localtime, strftime
 from casysabstraction import CasysObject, CasysBaseError
+import v4l2
+import fcntl
 
 import gi
 gi.require_version('Gst', '1.0')
@@ -28,39 +30,52 @@ gi.require_version('GstVideo', '1.0')
 from gi.repository import Gst, GObject, GstVideo
 
 
-GObject.threads_init()
 Gst.init(None)
 
 
 class CasysControl(CasysObject):
     def __init__(self):
         super().__init__()
-        self.__logger = logging.getLogger('CasysControl')
-        self.__logger.debug('Initializing a CasysControl object.')
+        self._logger = logging.getLogger('CasysControl')
+        self._logger.debug('Initializing a CasysControl object.')
         self.__deviceList = CasysDevicesList()
         self.update()
 
     def update(self):
-        self.__logger.debug('Finding new available camera devices.')
-        for devFile in iglob(VIDEO_DEV_FILES_PATTERN):
-            if devFile in self.__deviceList:
-                self.__logger.debug('Skipping {}. (already added)'.format(devFile))
+        self._logger.debug('Finding new available camera devices.')
+        for video_device in iglob(VIDEO_DEV_FILES_PATTERN):
+            if video_device in self.__deviceList:
+                self._logger.debug('Skipping {}. (already added)'.
+                                   format(video_device))
                 continue
 
-            self.__logger.debug('New camera detected on: {}.'.format(devFile))
+            with open(video_device, "rb") as dev_file:
+                caps = v4l2.v4l2_capability()
+                ret_code = fcntl.ioctl(dev_file, v4l2.VIDIOC_QUERYCAP, caps)
+                if ret_code != 0:
+                    self._logger.warning('Failed to read caps for {}.'.
+                                         format(video_device))
+                    continue
+                if (caps.reserved[0] & v4l2.V4L2_CAP_VIDEO_CAPTURE) == 0:
+                    self._logger.info('{} does not support video capturing.'.
+                                      format(video_device))
+                    continue
 
-            casysDev = CasysDevice(devFile)
+            self._logger.info('New video capturing device: {}.'.
+                              format(video_device))
+
+            casysDev = CasysDevice(video_device)
 
             try:
                 casysDev.CreatePipeline()
             except (CreateElementError, AddToPipelineError, LinkingElementsError):
-                self.__logger.critical('An error was encountered while creating a CasysDevice for ' + devFile, exc_info=True)
+                self._logger.critical('An error was encountered while creating a CasysDevice for ' + video_device, exc_info=True)
                 del casysDev
                 continue
 
             self.__deviceList.append(casysDev)
 
-        self.__logger.debug("Currently {} detected camera devices.".format(len(self.__deviceList)))
+        self._logger.debug("Currently {} detected camera devices.".format(len(self.__deviceList)))
 
     def __getitem__(self, key):
         return self.__deviceList[key]
@@ -79,11 +94,10 @@ class CasysControl(CasysObject):
                 # Possibly propagated exceptions: ValueError, TypeError
                 self.__deviceList[device].connectGui(xid)
         else:
-            self.__logger.debug("Attempting to connect all devices.")
-            xidIndex = 0
-            for dev in self.__deviceList:
-                dev.connectGui(xid[xidIndex])
-                xidIndex += 1
+            self._logger.debug("Attempting to connect all devices.")
+            for idx, dev in enumerate(self.__deviceList):
+                print("Connecting", dev.DevicePath, "to", xid[idx])
+                dev.connectGui(xid[idx])
 
     def Fragment(self, device=None):
         """
@@ -96,7 +110,7 @@ class CasysControl(CasysObject):
                 # Possibly propagated exceptions: ValueError, TypeError
                 self.__deviceList[device].Fragment()
         else:
-            self.__logger.debug("Attempting to start recording for all devices.")
+            self._logger.debug("Attempting to start recording for all devices.")
             for dev in self.__deviceList:
                 dev.Fragment()
         return True
@@ -112,7 +126,7 @@ class CasysControl(CasysObject):
                 # Possibly propagated exceptions: ValueError, TypeError
                 self.__deviceList[device].Start()
         else:
-            self.__logger.debug("Attempting to start recording for all devices.")
+            self._logger.debug("Attempting to start recording for all devices.")
             for dev in self.__deviceList:
                 dev.Start()
 
@@ -185,12 +199,12 @@ class CasysControl(CasysObject):
         '''
 
     def __del__(self):
-        self.__logger.debug('Deleting the CasysControl object.')
+        self._logger.debug('Deleting the CasysControl object.')
         del self.__deviceList
-        del self.__logger
+        del self._logger
 
     def __iter__(self):
-        self.__logger.debug('Iterator of the device list.')
+        self._logger.debug('Iterator of the device list.')
         return iter(self.__deviceList)
 
     def free(self):
@@ -200,7 +214,7 @@ class CasysControl(CasysObject):
 class CasysDevicesList(list, CasysObject):
     def __init__(self):
         super().__init__()
-        # self.__logger = logging.getLogger('CasysDeviceList')
+        # self._logger = logging.getLogger('CasysDeviceList')
         self.__names = []
         self.__paths = []
 
@@ -265,47 +279,53 @@ class CasysDevicePipeline(CasysObject):
     def add_element(self,
                     element_type,
                     element_name,
-                    link_to_last=False,
-                    **properties):
+                    link=True,
+                    properties={},
+                    **kwargs):
         self._logger.info("Adding new element {} ({}: {}).".format(
                 element_name, element_type, properties))
         element = Gst.ElementFactory.make(
             element_type, element_name)
 
+        try:
+            set_property = element.set_property
+        except TypeError:
+            raise CreateElementError(element_type) from None
+
         for key, value in properties.items():
-            try:
-                element.set_property(key, value)
-            except TypeError:
-                raise CreateElementError(element_type) from None
+            set_property(key, value)
+        for key, value in kwargs.items():
+            set_property(key, value)
 
         if not self._gstpipeline.add(element):
             raise AddToPipelineError(element_type)
 
-        try:
-            last = self._last_element
-        except AttributeError:
-            pass
-        else:
-            if not last.link(element):
-                raise LinkingElementsError(last, element)
-        finally:
-            self._last_element = element
+        if link:
+            try:
+                last = self._last_element
+            except AttributeError:
+                pass
+            else:
+                if not last.link(element):
+                    raise LinkingElementsError(last, element)
+            finally:
+                self._last_element = element
 
         return element
 
 
 class CasysDevice(CasysObject):
-    def __init__(self, devFile):
+    def __init__(self, video_device):
         super().__init__()
         # TODO: Check existance or rely on creator?
-        self.__logger = logging.getLogger('CasysDevice ' + str(devFile))
-        self.__logger.debug('Initializing a new instance of CasysDevice')
-        self.DevicePath = devFile
-        self.DeviceName = path.basename(devFile)
+        self._logger = logging.getLogger('CasysDevice ' + str(video_device))
+        self._logger.debug('Initializing a new instance of CasysDevice')
+        self.DevicePath = video_device
+        self.DeviceName = path.basename(video_device)
 
     def CreatePipeline(self):
         # Creating Gstreamer elements.
-        self.__logger.debug('Creating pipeline-elements.')
+        self._logger.debug('Creating pipeline-elements.')
         self._pipeline = CasysDevicePipeline('Pipeline_' + self.DeviceName)
         self._pipeline.add_element('v4l2src',
                                    'Camera_'+self.DeviceName,
@@ -318,143 +338,146 @@ class CasysDevice(CasysObject):
                                    valignment="top",
                                    halignment="right",
                                    )
-        self._pipeline.add_element('tee', 'Tee_'+self.DeviceName)
+        self._tee = self._pipeline.add_element('tee', 'Tee_'+self.DeviceName)
         self._pipeline.add_element('queue', 'FileQueue_'+self.DeviceName)
         self._pipeline.add_element('matroskamux', 'Mux_'+self.DeviceName)
-        self._pipeline.add_element('filesink',
-                                   'File_'+self.DeviceName,
-                                   location=self.__createFileName(),
-                                   )
+        self._filesink = self._pipeline.add_element(
+            'filesink',
+            'File_'+self.DeviceName,
+            location=self._generate_filename(),
+            )
 
         # Getting the bus.
-        self.__logger.debug('Getting the bus of this pipeline.')
+        self._logger.debug('Getting the bus of this pipeline.')
         bus = self._pipeline.get_bus()
         bus.set_name("Bus_"+self.DeviceName)
 
         # Connecting the bus to the handler.
-        # FIXME: the following causes problems
-        # bus.add_signal_watch()
+        bus.add_signal_watch()
         bus.connect('message', self.__message_handler)
+        bus.connect('sync-message::element', self._sync_message_handler)
+
+    def _sync_message_handler(self, bus, msg):
+        print(msg)
+        print(msg.src)
+        print(msg.get_structure())
 
     def __message_handler(self, bus, msg):
         # TODO: Another logger with name BUS amd device?
-        msg_name = msg.get_structure().get_name()
-        self.__logger.debug("A {} message is received, calling the apropriate handler".format(msg_name))
+        # msg_name = msg.get_structure().get_name()
+        self._logger.debug("A {} message is received, calling the apropriate handler".format(msg.type))
 
-        if msg_name == 'GstMessageNewClock':
-            self.__logger.info("GstMessage {}: New clock is selected for {} with value {}".format(msg.seqnum, msg.src.get_name(), msg.parse_new_clock().get_time()))
+        if msg.type == Gst.MessageType.NEW_CLOCK:
+            self._logger.info("GstMessage {}: New clock is selected for {} with value {}".format(msg.seqnum, msg.src.get_name(), msg.parse_new_clock().get_time()))
 
-        elif msg_name == 'GstMessageStreamStatus':
+        elif msg.type == Gst.MessageType.STREAM_STATUS:
             [typ, own] = msg.parse_stream_status()
-            self.__logger.info("GstMessage {}: stream Status received from {}: Type = {}, owner = {}.".format(msg.seqnum, msg.src.get_name(), typ.value_nick, own.get_name()))
+            self._logger.info("GstMessage {}: stream Status received from {}: Type = {}, owner = {}.".format(msg.seqnum, msg.src.get_name(), typ.value_nick, own.get_name()))
 
-        elif msg_name == 'GstMessageStateChanged':
+        elif msg.type == Gst.MessageType.STATE_CHANGED:
             [old, new, pending] = msg.parse_state_changed()
-            self.__logger.info("GstMessage {}: State of {} changed from {} to {} (Pending: {})".format(msg.seqnum, msg.src.get_name(), old.value_nick, new.value_nick, pending.value_nick))
+            self._logger.info("GstMessage {}: State of {} changed from {} to {} (Pending: {})".format(msg.seqnum, msg.src.get_name(), old.value_nick, new.value_nick, pending.value_nick))
 
-        elif msg_name == 'GstMessageAsyncDone':
-            self.__logger.info("GstMessage {}: Async-done received from {} at {}".format(msg.seqnum, msg.src.get_name(), msg.parse_async_done()))
+        elif msg.type == Gst.MessageType.ASYNC_DONE:
+            self._logger.info("GstMessage {}: Async-done received from {} at {}".format(msg.seqnum, msg.src.get_name(), msg.parse_async_done()))
 
-        elif msg_name == 'GstMessageWarning':
+        elif msg.type == Gst.MessageType.WARNING:
             [gerr, debug] = msg.parse_warning()
-            self.__logger.warning("GstMessage {}: WARNING {} from {}: {}\n->{}".format(msg.seqnum, gerr.code, msg.src.get_name(), gerr.message, debug))
+            self._logger.warning("GstMessage {}: WARNING {} from {}: {}\n->{}".format(msg.seqnum, gerr.code, msg.src.get_name(), gerr.message, debug))
 
-        elif msg_name == 'GstMessageStreamStart':
-            self.__logger.info("GstMessage {}: Stream-Start received from {}".format(msg.seqnum, msg.src.get_name()))
+        elif msg.type == Gst.MessageType.STREAM_START:
+            self._logger.info("GstMessage {}: Stream-Start received from {}".format(msg.seqnum, msg.src.get_name()))
 
-        elif msg_name == 'GstMessageQOS':
+        elif msg.type == Gst.MessageType.QOS:
             # TODO: Implement.
-            self.__logger.info("GstMessage {}: QOS of {}".format(msg.seqnum, msg.src.get_name()))
+            self._logger.info("GstMessage {}: QOS of {}".format(msg.seqnum, msg.src.get_name()))
 
-        elif msg_name == 'GstMessageError':
+        elif msg.type == Gst.MessageType.ERROR:
             [gerr, debug] = msg.parse_error()
-            self.__logger.critical("GstMessage {}: Error {} in {}:\n{}\n  -->{}".format(msg.seqnum, gerr.code, msg.src.get_name(), gerr.message, debug))
+            self._logger.critical("GstMessage {}: Error {} in {}:\n{}\n  -->{}".format(msg.seqnum, gerr.code, msg.src.get_name(), gerr.message, debug))
 
         else:
             mstruct = msg.get_structure()
-            num = mstruct.n_fields()
+            try:
+                num = mstruct.n_fields()
+                name = mstruct.get_name()
+            except AttributeError:
+                num = 0
+                name = "N/A"
             errMsg = """Unhandled GstMessage number {} from element {} of bus {}
     Structure analysis:
       Name = {}
-      Number of fields = {}""".format(msg.seqnum, msg.src.get_name(), bus.get_name(), msg.get_structure().get_name(), num)
+      Number of fields = {}""".format(msg.seqnum, msg.src.get_name(), bus.get_name(), name, num)
             for i in range(num):
                 f = mstruct.nth_field_name(i)
                 val = mstruct.get_value(f)
                 errMsg += "\n    #{} - {} = {}".format(i, f, val)
-            self.__logger.fatal(errMsg)
+            self._logger.fatal(errMsg)
 
     def connectGui(self, xid):
-        self.__logger.debug("Connecting to XID: " + str(xid))
-        # TODO
-        """
-        self.__logger.debug("Geting the tee element from the pipeline")
-        tee = self.__pipeline.get_by_name('Tee' + self.DeviceName)
-        if tee is None:
-            raise KeyError('Tee' + self.DeviceName + ' was not found in the pipeline of device: ' + self.DeviceName)
+        self._logger.debug("Connecting to XID: " + str(xid))
+        self._logger.debug("Geting the tee element from the pipeline")
 
-        padt = tee.get_request_pad('src_%u')
+        queue = self._pipeline.add_element('queue',
+                                           'GuiQueue_'+self.DeviceName,
+                                           link=False)
+        vidconv = self._pipeline.add_element('videoconvert',
+                                             'converter_'+self.DeviceName,
+                                             link=False)
+        imgsink = self._pipeline.add_element(
+            'xvimagesink',
+            'Imagesink_'+self.DeviceName,
+            link=False,
+            sync=0,
+            properties={"force-aspect-ratio": True})
 
-        self.__logger.debug("Creating necessary elements")
-        queue = Gst.ElementFactory.make('queue', 'GuiQueue' + self.DeviceName)
+        self._logger.debug("Linking the new elements.")
+        self._tee.link(queue)
+        queue.link(vidconv)
+        vidconv.link(imgsink)
 
-        sink = Gst.ElementFactory.make('xvimagesink', 'imgsink' + self.DeviceName)
-        sink.set_property("sync", 0)
-        sink.set_property('force-aspect-ratio', True)
+        self._logger.debug("Connecting the video to the corresponding xid")
+        imgsink.set_window_handle(xid)
 
-        self.__logger.debug("Adding new elements to the pipeline.")
-        self.__pipeline.add(sink)
-        self.__pipeline.add(queue)
-
-        self.__logger.debug("Linking the new elements.")
-        tee.link(queue)
-        queue.link(sink)
-
-        self.__logger.debug("Connecting the video to the corresponding xid")
-        sink.set_window_handle(xid)
-
-        self.__logger.debug("Setting the whole pipeline to playing.")
+        self._logger.debug("Setting the whole pipeline to playing.")
         self._pipeline.set_state(Gst.State.PLAYING)
-        """
 
     def Stop(self):
-        self.__logger.debug('Stoping device.')
+        self._logger.debug('Stoping device.')
         try:
             self._pipeline.set_state(Gst.State.NULL)
         except AttributeError:
             pass
 
     def Start(self):
-        self.__logger.debug("Playing device.")
+        self._logger.debug("Playing device.")
         self._pipeline.set_state(Gst.State.PLAYING)
 
     def Fragment(self):
-        self.__logger.debug("Fragmenting video files")
-        # TODO
-        """
-        outfile = self.__pipeline.get_by_name('File' + self.DeviceName)
-        NewName = self.__createFileName()
+        self._logger.debug("Fragmenting video files")
+        # outfile = self.__pipeline.get_by_name('File' + self.DeviceName)
+        new_name = self._generate_filename()
         self.Stop()
-        outfile.set_property('location', NewName)
+        self._filesink.set_property('location', new_name)
         self.Start()
-        """
 
     def free(self):
-        self.__logger.debug('Deleting the CasysDevice')
+        self._logger.debug('Deleting the CasysDevice')
         self.Stop()
         try:
             self._pipeline.free()
         except AttributeError:
             pass
 
-    def __createFileName(self):
+    def _generate_filename(self):
         current_time = strftime("%Y-%m-%d-%H", localtime())
-        self.__logger.debug("Creating a new file name at '" + current_time + "'.")
+        self._logger.debug("Creating a new file name at '" + current_time + "'.")
         for index in self.__counter():
             filename = path.join(VIDEO_STORAGE_PATH, self.DeviceName + ' ' + current_time + index + EXTENSION)
             if path.exists(filename):
-                self.__logger.warning("File " + filename + " already exists.")
+                self._logger.warning("File " + filename + " already exists.")
             else:
-                self.__logger.debug('Using: ' + filename)
+                self._logger.debug('Using: ' + filename)
                 return filename
 
     def __counter(self):
